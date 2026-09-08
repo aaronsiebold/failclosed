@@ -28,7 +28,7 @@ Python 3.9+, standard library only. No dependencies, nothing to install.
 ```bash
 git clone https://github.com/aaronsiebold/failclosed
 cd failclosed
-python3 -m unittest discover -s tests   # 90 tests, ~0.1s
+python3 -m unittest discover -s tests   # 119 tests, ~0.1s
 python3 examples/outbound.py            # the worked example
 python3 -m failclosed.mutate            # break the code, watch tests catch it
 ```
@@ -172,6 +172,11 @@ complains.*
 Mutation sites come from `tokenize`, not a regex, so comments and docstrings are
 never touched and every mutant is real code.
 
+The runner excludes itself from mutation — mutating the mutator mid-run is a
+knot not worth tying — so `tests/test_mutate.py` covers it directly instead,
+including the claim above: comments, docstrings and string literals must yield
+no mutation sites at all.
+
 ```
 $ python3 -m failclosed.mutate
 
@@ -220,7 +225,7 @@ Delete the two tests that pin the kill switch's fail-closed branch and rerun:
 
 ```
 $ python3 -m unittest discover -s tests
-OK                                    # 88 tests, still green
+OK                                    # 117 tests, still green
 
 $ python3 -m failclosed.mutate
 1 SURVIVOR(S) — no test objected to these changes:
@@ -302,8 +307,8 @@ failclosed/guard.py       Gate, Refuse, Undetermined, @guard  — the fail-close
 failclosed/ledger.py      Ledger, StaleLedger                 — a record that knows its own age
 failclosed/killswitch.py  KillSwitch                          — one file that stops everything
 failclosed/evals.py       Case, Suite, Baseline, Report       — rate-based eval + drift detection
-failclosed/mutate.py      the mutation runner
-tests/                    90 tests, standard library unittest
+failclosed/mutate.py      the mutation runner (excluded from mutation; tested directly)
+tests/                    119 tests, standard library unittest — incl. test_mutate.py
 examples/outbound.py      five staged failures against one gate
 docs/DESIGN.md            why each decision went the way it did
 ```
