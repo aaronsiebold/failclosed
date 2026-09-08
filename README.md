@@ -1,5 +1,10 @@
 # failclosed
 
+[![ci](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml/badge.svg)](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml)
+![python](https://img.shields.io/badge/python-3.9%2B-blue)
+![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+![mutation score](https://img.shields.io/badge/mutants%20killed-45%2F48-brightgreen)
+
 **A guard that stays green when you inject a violation is asserting nothing.**
 
 That sentence cost me a weekend. I had a duplicate-send guard on an outbound
@@ -170,24 +175,28 @@ never touched and every mutant is real code.
 ```
 $ python3 -m failclosed.mutate
 
-48 mutation site(s) across 4 file(s)
-  [  1/ 48] killed   failclosed/evals.py:59 < -> <=
-  [  2/ 48] killed   failclosed/evals.py:60 <= -> <
-  ...
-45/48 mutants killed  (93.8%)  in 11.9s
+48 mutation site(s) across 5 file(s)
 
-Survivors — no test objected to these changes:
+  [  1/48] killed   failclosed/evals.py:58 < -> <=
+  [  2/48] killed   failclosed/evals.py:60 <= -> <
+  ...
+  [ 48/48] killed   failclosed/ledger.py:156 not  -> (deleted)
+
+45/48 mutants killed  (93.8%)  in 20.1s
+
+3 known equivalent mutant(s), allow-listed:
 
   failclosed/evals.py:107 >= -> >
-      elif self.drift is not None and abs(self.drift) >= 0.01:
+      0.01 has no exact binary float representation, so the equality case is
+      unreachable and no input distinguishes > from >=
   failclosed/evals.py:142 True -> False
-      json.dump(payload, fh, indent=2, sort_keys=True)
+      sort_keys changes key order in the serialised JSON, not behaviour
   failclosed/ledger.py:55 True -> False
-      return json.dumps({"key": ..., "at": ..., "meta": ...}, sort_keys=True)
+      as above: byte order of a serialised entry, not behaviour
 ```
 
-**All three survivors are equivalent mutants, and I am leaving them.** The
-honest thing is to say which, and why:
+**All three survivors are equivalent mutants**, listed in `.mutants-allow` with
+a reason each. Anything *not* on that list fails the build:
 
 - `abs(drift) >= 0.01` — `0.01` has no exact binary float representation, so the
   equality case is unreachable and `>` and `>=` cannot be distinguished by any
@@ -195,9 +204,37 @@ honest thing is to say which, and why:
 - `sort_keys=True` (twice) — changes the byte order of keys in serialised JSON,
   not behaviour. Both files round-trip identically either way.
 
-Chasing 100% would mean writing tests that assert on incidental things, which
-makes the suite harder to change for no gain in safety. The number is not the
-goal; knowing *which* claims are unchecked is.
+Chasing 100% would mean asserting on serialised byte order and constructing a
+float equality that cannot occur — tests that make the suite harder to change
+and catch nothing. The number is not the goal; knowing *which* claims are
+unchecked is.
+
+The allow-list is keyed on the source line, not the line number. A
+line-numbered allow-list silently starts excusing a different mutant the moment
+someone adds an import above it, which is the worst possible failure mode for a
+safety allow-list.
+
+### Does it actually catch anything?
+
+Delete the two tests that pin the kill switch's fail-closed branch and rerun:
+
+```
+$ python3 -m unittest discover -s tests
+OK                                    # 88 tests, still green
+
+$ python3 -m failclosed.mutate
+1 SURVIVOR(S) — no test objected to these changes:
+
+  failclosed/killswitch.py:45 True -> False
+      return True
+$ echo $?
+1
+```
+
+The suite is green and wrong. `return True` is the line that makes an unreadable
+switch count as engaged — the single most important line in that file — and
+nothing was checking it. That is the gap this tool exists to find, and it is why
+CI runs it as a separate required job rather than trusting the green tick.
 
 ### What this found in its own runner
 

@@ -80,6 +80,41 @@ class Survivor:
     mutation: Mutation
     source_line: str
 
+    @property
+    def key(self) -> str:
+        """Identity of a survivor, stable across edits elsewhere in the file.
+
+        Deliberately not line-numbered: an allow-list keyed on line numbers
+        silently starts excusing a different mutant the moment someone adds an
+        import, which is the worst possible failure for a safety allow-list.
+        """
+        return f"{self.mutation.path} :: {self.source_line.strip()} :: {self.mutation.original}->{self.mutation.replacement}"
+
+
+ALLOW_FILE = ".mutants-allow"
+
+
+def load_allowed(root: str) -> Dict[str, str]:
+    """Known equivalent mutants: `key  # why it cannot be killed`.
+
+    Equivalent mutants are real — `sort_keys=True` changes byte order, not
+    behaviour, and no input distinguishes them. The choice is between an
+    allow-list with a stated reason per entry and a permanently red build that
+    everyone learns to ignore. The first is honest; the second is decoration.
+    """
+    path = os.path.join(root, ALLOW_FILE)
+    allowed: Dict[str, str] = {}
+    if not os.path.exists(path):
+        return allowed
+    with open(path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            key, _, why = line.partition("  # ")
+            allowed[key.strip()] = why.strip() or "no reason given"
+    return allowed
+
 
 def sites(path: str, *, relative_to: Optional[str] = None) -> List[Mutation]:
     """Every mutation site in one file, found via tokenize."""
@@ -223,17 +258,34 @@ def run(
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
 
+    allowed = load_allowed(root)
+    known = [s for s in survivors if s.key in allowed]
+    unexpected = [s for s in survivors if s.key not in allowed]
+
     if verbose:
         elapsed = time.perf_counter() - started
         total = killed + len(survivors)
         score = (killed / total * 100) if total else 100.0
         print(f"\n{killed}/{total} mutants killed  ({score:.1f}%)  in {elapsed:.1f}s")
-        if survivors:
-            print("\nSurvivors — no test objected to these changes:\n")
-            for s in survivors:
+        if known:
+            print(f"\n{len(known)} known equivalent mutant(s), allow-listed:\n")
+            for s in known:
+                print(f"  {s.mutation.label}")
+                print(f"      {allowed[s.key]}")
+        if unexpected:
+            print(f"\n{len(unexpected)} SURVIVOR(S) — no test objected to these changes:\n")
+            for s in unexpected:
                 print(f"  {s.mutation.label}")
                 print(f"      {s.source_line.strip()}")
-    return killed, survivors
+            print(
+                f"\nEither write a test that fails when this changes, or add it to "
+                f"{ALLOW_FILE} with a reason:\n"
+            )
+            for s in unexpected:
+                print(f"  {s.key}  # why this cannot be killed")
+        elif not known:
+            print("\nNo survivors.")
+    return killed, unexpected
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

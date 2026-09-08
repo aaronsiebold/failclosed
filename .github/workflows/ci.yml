@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,7 +23,8 @@ jobs:
         run: python examples/outbound.py
 
   mutants:
-    # The suite passing is a claim; this is the check on it.
+    # The suite passing is a claim. This is the check on the claim.
+    # Fails on any survivor not listed in .mutants-allow with a stated reason.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +32,4 @@ jobs:
         with:
           python-version: "3.13"
       - name: Mutation testing
-        # Exits non-zero on any survivor. The three known equivalent mutants
-        # are documented in the README, so this is expected to fail loudly
-        # until they are either killed or explicitly allow-listed.
-        run: python -m failclosed.mutate || true
+        run: python -m failclosed.mutate
