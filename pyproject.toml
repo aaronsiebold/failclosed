@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "failclosed"
+version = "0.1.0"
+description = "Guards that refuse when they cannot prove an action is safe, and the tooling to prove the guards assert something."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Aaron Siebold" }]
+keywords = ["guards", "fail-closed", "llm", "evaluation", "mutation-testing", "reliability"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/aaronsiebold/failclosed"
+
+[tool.setuptools]
+packages = ["failclosed"]

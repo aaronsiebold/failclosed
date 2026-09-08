@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+      - name: Worked example
+        run: python examples/outbound.py
+
+  mutants:
+    # The suite passing is a claim; this is the check on it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Mutation testing
+        # Exits non-zero on any survivor. The three known equivalent mutants
+        # are documented in the README, so this is expected to fail loudly
+        # until they are either killed or explicitly allow-listed.
+        run: python -m failclosed.mutate || true
