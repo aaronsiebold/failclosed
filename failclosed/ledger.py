@@ -86,8 +86,14 @@ class Ledger:
         self._clock = clock
         self._keys: Dict[str, Entry] = {}
         self._synced_at: Optional[float] = None
-        if path and os.path.exists(path):
-            self._load()
+        if path:
+            # Not os.path.exists(): it answers False for a file it cannot
+            # read, and an unreadable ledger loaded as empty forgets every
+            # send. Only a file that is truly absent starts empty.
+            try:
+                self._load()
+            except FileNotFoundError:
+                pass
 
     # ---------------------------------------------------------------- state
 

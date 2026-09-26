@@ -134,6 +134,37 @@ class PersistenceTests(unittest.TestCase):
         self.assertTrue(os.path.exists(ledger.path))
 
 
+# Root ignores directory permissions, so a chmod-000 directory is not a fault
+# for it. Every other user gets the real error from the real filesystem.
+AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+class UnreadableLedgerTests(unittest.TestCase):
+    """A ledger file that exists but cannot be read must not load as empty.
+
+    An empty ledger plus one sync of an empty provider page reads as fresh and
+    says nobody was ever contacted: a duplicate send that every guard allows.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
+        self.path = os.path.join(self.dir, "ledger.jsonl")
+        Ledger(self.path).record("alice@example.com")
+
+    @unittest.skipIf(AS_ROOT, "root ignores directory permissions")
+    def test_an_unreadable_ledger_refuses_to_load(self):
+        os.chmod(self.dir, 0)
+        try:
+            with self.assertRaises(OSError):
+                Ledger(self.path)
+        finally:
+            os.chmod(self.dir, 0o700)
+
+    def test_a_missing_ledger_file_still_starts_empty(self):
+        self.assertEqual(len(Ledger(os.path.join(self.dir, "absent", "l.jsonl"))), 0)
+        self.assertEqual(len(Ledger(self.path)), 1)
+
+
 class IntegrationTests(unittest.TestCase):
     def test_stale_ledger_makes_the_gate_refuse(self):
         clock = FakeClock()
