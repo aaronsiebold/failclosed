@@ -1,10 +1,12 @@
 import os
-import stat
 import tempfile
 import unittest
 
 from failclosed import KillSwitch
 
+# Root ignores directory permissions, so a chmod-000 directory is not a fault
+# for it. Every other user gets the real error from the real filesystem.
+AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
 class KillSwitchTests(unittest.TestCase):
     def setUp(self):
@@ -67,17 +69,34 @@ class FailClosedTests(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
         self.switch = KillSwitch(os.path.join(self.dir, "HALT"))
 
+    # No mocks here on purpose. os.path.exists() catches OSError itself and
+    # answers False, so a mock that makes it raise tests a call that never
+    # happens. A directory the process cannot search is the real fault.
+
+    @unittest.skipIf(AS_ROOT, "root ignores directory permissions")
     def test_an_unreadable_switch_reports_engaged(self):
-        from unittest import mock
-
-        with mock.patch("os.path.exists", side_effect=OSError("permission denied")):
+        self.switch.engage("halt")
+        os.chmod(self.dir, 0)
+        try:
             self.assertTrue(self.switch.engaged)
+        finally:
+            os.chmod(self.dir, 0o700)
 
-    def test_an_unreadable_switch_is_truthy(self):
-        from unittest import mock
-
-        with mock.patch("os.path.exists", side_effect=OSError("io error")):
+    @unittest.skipIf(AS_ROOT, "root ignores directory permissions")
+    def test_a_switch_that_cannot_be_checked_is_truthy(self):
+        # No HALT file at all, but nothing can prove that: still engaged.
+        os.chmod(self.dir, 0)
+        try:
             self.assertTrue(bool(self.switch))
+        finally:
+            os.chmod(self.dir, 0o700)
+
+    def test_a_dangling_symlink_is_present_so_engaged(self):
+        try:
+            os.symlink(os.path.join(self.dir, "missing-target"), self.switch.path)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable here")
+        self.assertTrue(self.switch.engaged)
 
     def test_engaged_at_is_none_when_unreadable(self):
         from unittest import mock
@@ -95,10 +114,6 @@ class FailClosedTests(unittest.TestCase):
         self.switch.release()
         self.switch.release()
         self.assertFalse(self.switch.engaged)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ReasonFormattingTests(unittest.TestCase):
@@ -120,3 +135,7 @@ class ReasonFormattingTests(unittest.TestCase):
     def test_reason_is_empty_for_a_switch_created_by_touch(self):
         open(self.switch.path, "w").close()
         self.assertEqual(self.switch.reason, "")
+
+
+if __name__ == "__main__":
+    unittest.main()

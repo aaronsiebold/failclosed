@@ -38,11 +38,17 @@ class KillSwitch:
 
     @property
     def engaged(self) -> bool:
+        # Not os.path.exists(): it catches OSError itself and answers False,
+        # which would make an unreadable switch read as clear. lstat, so a
+        # dangling symlink at the path still counts as present.
         try:
-            return os.path.exists(self.path)
+            os.lstat(self.path)
+        except FileNotFoundError:
+            return False
         except OSError:
             # Cannot determine -> treat as engaged. See module docstring.
             return True
+        return True
 
     @property
     def reason(self) -> str:
