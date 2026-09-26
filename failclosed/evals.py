@@ -122,9 +122,13 @@ class Baseline:
 
     @classmethod
     def load(cls, path: str) -> "Baseline":
-        if not os.path.exists(path):
+        # Not os.path.exists(): it answers False for a file it cannot read,
+        # and an empty baseline silently turns drift detection off.
+        try:
+            fh = open(path, "r", encoding="utf-8")
+        except FileNotFoundError:
             return cls()
-        with open(path, "r", encoding="utf-8") as fh:
+        with fh:
             raw = json.load(fh)
         return cls({k: float(v["pass_rate"]) for k, v in raw.get("cases", {}).items()})
 

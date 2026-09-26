@@ -167,6 +167,21 @@ class BaselineTests(unittest.TestCase):
     def test_missing_baseline_file_loads_empty(self):
         self.assertEqual(Baseline.load(os.path.join(self.dir, "nope.json")).rates, {})
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores directory permissions"
+    )
+    def test_an_unreadable_baseline_raises_instead_of_loading_empty(self):
+        # An empty baseline turns drift detection off without a word. A real
+        # unreadable directory, not a mock: os.path.exists() would say False.
+        Suite([Case("a", run=lambda: "ok", check=is_ok, trials=2)]).run().save_baseline(self.path)
+        parent = os.path.dirname(self.path)
+        os.chmod(parent, 0)
+        try:
+            with self.assertRaises(OSError):
+                Baseline.load(self.path)
+        finally:
+            os.chmod(parent, 0o700)
+
     def test_saved_baseline_round_trips(self):
         report = Suite([
             Case("a", run=lambda: "ok", check=is_ok, trials=4),
