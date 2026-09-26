@@ -62,7 +62,10 @@ class KillSwitch:
         try:
             with open(self.path, "r", encoding="utf-8") as fh:
                 first = fh.readline().strip()
-        except (OSError, UnicodeDecodeError):
+        except (OSError, ValueError):
+            # ValueError covers UnicodeDecodeError (a file that is not UTF-8)
+            # and a path the OS rejects (NUL byte, lone surrogate), which
+            # `engaged` answers True for. Unreadable reason -> "".
             return ""
         return "" if first.startswith("engaged ") else first
 
@@ -70,7 +73,7 @@ class KillSwitch:
     def engaged_at(self) -> Optional[float]:
         try:
             return os.path.getmtime(self.path)
-        except OSError:
+        except (OSError, ValueError):
             return None
 
     def engage(self, reason: str = "") -> None:

@@ -121,6 +121,21 @@ class GateTests(unittest.TestCase):
         self.assertIn("unreadable", d.reason)
         self.assertEqual(d.guard, "killswitch")
 
+    def test_engaged_killswitch_whose_reason_raises_still_denies(self):
+        # evaluate() never raises: a switch that is engaged but cannot say why
+        # is still engaged.
+        class Engaged:
+            engaged = True
+
+            @property
+            def reason(self):
+                raise RuntimeError("switch backend down")
+
+        d = Gate(allows, killswitch=Engaged()).evaluate(Action())
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.guard, "killswitch")
+        self.assertIn("reason unreadable (RuntimeError: switch backend down)", d.reason)
+
     def test_engaged_killswitch_without_reason_still_denies(self):
         class Engaged:
             engaged = True

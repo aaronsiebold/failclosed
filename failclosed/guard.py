@@ -129,7 +129,10 @@ class Gate:
                     guard="killswitch",
                 )
             if engaged:
-                reason = getattr(self._killswitch, "reason", "") or "no reason recorded"
+                try:
+                    reason = getattr(self._killswitch, "reason", "") or "no reason recorded"
+                except Exception as exc:  # noqa: BLE001 - engaged is engaged, reason or not
+                    reason = f"reason unreadable ({exc.__class__.__name__}: {exc})"
                 return Decision(False, f"kill switch engaged: {reason}", guard="killswitch")
 
         cleared: List[str] = []

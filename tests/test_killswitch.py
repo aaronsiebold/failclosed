@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from failclosed import KillSwitch
+from failclosed import Gate, KillSwitch
 
 # Root ignores directory permissions, so a chmod-000 directory is not a fault
 # for it. Every other user gets the real error from the real filesystem.
@@ -122,6 +122,41 @@ class FailClosedTests(unittest.TestCase):
         self.switch.release()
         self.switch.release()
         self.assertFalse(self.switch.engaged)
+
+
+class PathTheOSRejectsTests(unittest.TestCase):
+    """os.* raises ValueError, not OSError, for a path it cannot encode.
+
+    A NUL byte (in str or bytes) and a lone surrogate both do it. `engaged`
+    answers True for them, so every accessor a caller reads next must answer
+    too, and a Gate in front of the switch must refuse rather than raise.
+    """
+
+    def setUp(self):
+        d = tempfile.mkdtemp(prefix="failclosed-test-")
+        self.paths = {
+            "NUL in str": os.path.join(d, "HA\0LT"),
+            "lone surrogate": os.path.join(d, "HA\ud800LT"),
+            "NUL in bytes": os.path.join(os.fsencode(d), b"HA\0LT"),
+        }
+
+    def test_a_gate_in_front_of_it_refuses_and_raises_nothing(self):
+        for label, path in self.paths.items():
+            with self.subTest(label):
+                d = Gate(lambda a: None, killswitch=KillSwitch(path)).evaluate("x")
+                self.assertFalse(d.allowed)
+                self.assertEqual(d.guard, "killswitch")
+                self.assertEqual(d.reason, "kill switch engaged: no reason recorded")
+
+    def test_reason_is_empty(self):
+        for label, path in self.paths.items():
+            with self.subTest(label):
+                self.assertEqual(KillSwitch(path).reason, "")
+
+    def test_engaged_at_is_none(self):
+        for label, path in self.paths.items():
+            with self.subTest(label):
+                self.assertIsNone(KillSwitch(path).engaged_at)
 
 
 class ReasonFormattingTests(unittest.TestCase):
