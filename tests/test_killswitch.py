@@ -98,6 +98,14 @@ class FailClosedTests(unittest.TestCase):
             self.skipTest("symlinks unavailable here")
         self.assertTrue(self.switch.engaged)
 
+    def test_a_path_the_os_rejects_is_engaged_and_raises_nothing(self):
+        # os.lstat raises ValueError, not OSError, for an embedded NUL byte.
+        # Nothing can prove such a switch clear, and `engaged` raises nothing.
+        switch = KillSwitch(os.path.join(self.dir, "HA\0LT"))
+        self.assertTrue(switch.engaged)
+        self.assertTrue(bool(switch))
+        self.assertIn("ENGAGED", repr(switch))
+
     def test_engaged_at_is_none_when_unreadable(self):
         from unittest import mock
 

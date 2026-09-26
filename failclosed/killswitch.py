@@ -45,8 +45,9 @@ class KillSwitch:
             os.lstat(self.path)
         except FileNotFoundError:
             return False
-        except OSError:
+        except (OSError, ValueError):
             # Cannot determine -> treat as engaged. See module docstring.
+            # ValueError: lstat rejects a path with a NUL byte before the OS.
             return True
         return True
 
