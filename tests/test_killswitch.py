@@ -102,8 +102,10 @@ class FailClosedTests(unittest.TestCase):
 
     def test_a_path_the_os_rejects_is_engaged_and_raises_nothing(self):
         # os.lstat raises ValueError, not OSError, for an embedded NUL byte.
-        # Nothing can prove such a switch clear, and `engaged` raises nothing.
-        switch = KillSwitch(os.path.join(self.dir, "HA\0LT"))
+        # The constructor refuses such a path, so it gets here only if
+        # `path` is changed afterwards. Still nothing proves it clear.
+        switch = KillSwitch(os.path.join(self.dir, "HALT"))
+        switch.path = os.path.join(self.dir, "HA\0LT")
         self.assertTrue(switch.engaged)
         self.assertTrue(bool(switch))
         self.assertIn("ENGAGED", repr(switch))
@@ -126,26 +128,81 @@ class FailClosedTests(unittest.TestCase):
         self.assertFalse(self.switch.engaged)
 
 
-class PathTheOSRejectsTests(unittest.TestCase):
-    """os.* raises ValueError, not OSError, for a path it cannot encode.
+class UnusablePathTests(unittest.TestCase):
+    """A path no file can ever have is refused when the switch is built.
 
-    A NUL byte (in str or bytes) and a lone surrogate both do it. `engaged`
-    answers True for them, so every accessor a caller reads next must answer
-    too, and a Gate in front of the switch must refuse rather than raise.
+    Empty, a NUL byte, or not UTF-8 text: lstat finds nothing there, so the
+    switch would read clear, and engage() raises, so it could never be
+    engaged. A kill switch that can never be engaged must not exist.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
+
+    def test_construction_refuses_a_path_no_switch_can_be_at(self):
+        class EmptyPathLike:
+            def __fspath__(self):
+                return ""
+
+        d = self.dir
+        for label, path in {
+            "empty str": "",
+            "empty bytes": b"",
+            "empty PathLike": EmptyPathLike(),
+            "NUL in str": os.path.join(d, "HA\0LT"),
+            "NUL in bytes": os.path.join(os.fsencode(d), b"HA\0LT"),
+            "lone surrogate": os.path.join(d, "HA\ud800LT"),
+            "invalid UTF-8 bytes": os.path.join(os.fsencode(d), b"HA\xffLT"),
+            "surrogate-escaped str": os.path.join(d, "HA\udcffLT"),
+        }.items():
+            with self.subTest(label), self.assertRaisesRegex(ValueError, "can never be engaged"):
+                KillSwitch(path)
+
+    def test_construction_refuses_something_that_is_not_a_path(self):
+        # 0 matters most: os.lstat(0) would stat file descriptor 0.
+        for value in (None, 0, 1.5):
+            with self.subTest(repr(value)), self.assertRaises(TypeError):
+                KillSwitch(value)
+
+    def test_bytes_and_pathlike_paths_are_kept_as_text(self):
+        from pathlib import Path
+
+        halt = os.path.join(self.dir, "HALT")
+        self.assertEqual(KillSwitch(os.fsencode(halt)).path, halt)
+        switch = KillSwitch(Path(halt))
+        self.assertEqual(switch.path, halt)
+        switch.engage("from a Path")
+        self.assertTrue(switch.engaged)
+        self.assertEqual(switch.reason, "from a Path")
+
+
+class PathChangedLaterTests(unittest.TestCase):
+    """`path` is a plain attribute, so it can still be set to a bad value.
+
+    os.* raises ValueError, not OSError, for a NUL byte (in str or bytes)
+    or a lone surrogate. `engaged` answers True for those, so every
+    accessor a caller reads next must answer too, and a Gate in front of
+    the switch must refuse rather than raise.
     """
 
     def setUp(self):
         d = tempfile.mkdtemp(prefix="failclosed-test-")
+        self.good = os.path.join(d, "HALT")
         self.paths = {
             "NUL in str": os.path.join(d, "HA\0LT"),
             "lone surrogate": os.path.join(d, "HA\ud800LT"),
             "NUL in bytes": os.path.join(os.fsencode(d), b"HA\0LT"),
         }
 
+    def switch(self, path):
+        s = KillSwitch(self.good)
+        s.path = path
+        return s
+
     def test_a_gate_in_front_of_it_refuses_and_raises_nothing(self):
         for label, path in self.paths.items():
             with self.subTest(label):
-                d = Gate(lambda a: None, killswitch=KillSwitch(path)).evaluate("x")
+                d = Gate(lambda a: None, killswitch=self.switch(path)).evaluate("x")
                 self.assertFalse(d.allowed)
                 self.assertEqual(d.guard, "killswitch")
                 self.assertEqual(d.reason, "kill switch engaged: no reason recorded")
@@ -153,12 +210,83 @@ class PathTheOSRejectsTests(unittest.TestCase):
     def test_reason_is_empty(self):
         for label, path in self.paths.items():
             with self.subTest(label):
-                self.assertEqual(KillSwitch(path).reason, "")
+                self.assertEqual(self.switch(path).reason, "")
 
     def test_engaged_at_is_none(self):
         for label, path in self.paths.items():
             with self.subTest(label):
-                self.assertIsNone(KillSwitch(path).engaged_at)
+                self.assertIsNone(self.switch(path).engaged_at)
+
+
+class AbsentSwitchTests(unittest.TestCase):
+    """Absent reads clear only when the absence is proven.
+
+    A missing directory proves it: nobody can have created a file inside a
+    directory that does not exist (`touch` would fail, and engage() makes
+    the directory). A directory that is a symlink to nothing proves
+    nothing: that is a disk that went away, with the switch possibly on it.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
+
+    def link(self, name, target):
+        path = os.path.join(self.dir, name)
+        try:
+            os.symlink(os.path.join(self.dir, target), path)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable here")
+        return path
+
+    def test_a_missing_chain_of_directories_reads_clear(self):
+        switch = KillSwitch(os.path.join(self.dir, "a", "b", "c", "HALT"))
+        self.assertFalse(switch.engaged)
+        self.assertTrue(Gate(killswitch=switch).evaluate("x"))
+
+    def test_a_relative_path_in_the_current_directory_reads_clear(self):
+        here = os.getcwd()
+        os.chdir(self.dir)
+        try:
+            switch = KillSwitch("HALT")
+            self.assertFalse(switch.engaged)
+            open("HALT", "w").close()
+            self.assertTrue(switch.engaged)
+        finally:
+            os.chdir(here)
+
+    def test_a_dangling_symlink_parent_reads_engaged(self):
+        state = self.link("state", "unmounted-volume")
+        switch = KillSwitch(os.path.join(state, "HALT"))
+        self.assertTrue(switch.engaged)
+        d = Gate(lambda a: None, killswitch=switch).evaluate("x")
+        self.assertFalse(d.allowed)
+        self.assertEqual(d.guard, "killswitch")
+
+    def test_a_dangling_symlink_further_up_reads_engaged(self):
+        state = self.link("state", "unmounted-volume")
+        self.assertTrue(KillSwitch(os.path.join(state, "sub", "HALT")).engaged)
+
+    def test_a_symlinked_parent_that_resolves_reads_clear(self):
+        os.mkdir(os.path.join(self.dir, "real"))
+        state = self.link("state", "real")
+        switch = KillSwitch(os.path.join(state, "HALT"))
+        self.assertFalse(switch.engaged)
+        switch.engage("through the link")
+        self.assertTrue(switch.engaged)
+
+    def test_when_no_ancestor_can_be_seen_nothing_is_proven(self):
+        # Not even / or . answers: the walk runs out, and that proves nothing.
+        with mock.patch("os.lstat", side_effect=FileNotFoundError):
+            self.assertTrue(KillSwitch(os.path.join(self.dir, "HALT")).engaged)
+            self.assertTrue(KillSwitch("HALT").engaged)
+
+    def test_a_file_where_the_parent_should_be_reads_engaged(self):
+        open(os.path.join(self.dir, "state"), "w").close()
+        self.assertTrue(KillSwitch(os.path.join(self.dir, "state", "HALT")).engaged)
+
+    def test_a_symlink_loop_as_the_parent_reads_engaged(self):
+        loop = self.link("loop", "loop")
+        self.assertTrue(KillSwitch(os.path.join(loop, "HALT")).engaged)
 
 
 def finishes(fn, seconds=30.0):

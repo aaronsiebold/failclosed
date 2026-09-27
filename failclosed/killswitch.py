@@ -8,6 +8,17 @@ Two properties matter more than the feature itself:
    permissions, a disk that went away, a path that is somehow a directory — the
    answer is "stop", not "carry on". Every other design makes the switch
    useless in exactly the conditions that would make you reach for it.
+
+Two consequences of the second rule:
+
+* A missing file reads clear only when its absence is proven: the nearest
+  directory above it that exists is a real directory. A missing directory
+  proves it, because no one can create a file inside a directory that is not
+  there. A directory that is a symlink to nothing proves nothing: that is a
+  disk that went away, and the switch may be on it.
+* A path no file can ever have (empty, a NUL byte, not UTF-8 text) is refused
+  when the KillSwitch is built. Such a switch would read clear, and engage()
+  could never change that.
 """
 
 from __future__ import annotations
@@ -15,7 +26,7 @@ from __future__ import annotations
 import os
 import stat
 import time
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = ["KillSwitch"]
 
@@ -29,6 +40,41 @@ _KINDS = {
     stat.S_IFCHR: "character device",
     stat.S_IFBLK: "block device",
 }
+
+
+def _usable(path: Union[str, bytes, os.PathLike]) -> str:
+    """The path as text, or ValueError if no switch file could ever be there."""
+    text = os.fsdecode(path)  # TypeError for anything that is not a path
+    if not text:
+        why = "it is empty"
+    elif "\0" in text:
+        why = "it contains a NUL byte"
+    else:
+        try:
+            text.encode("utf-8")
+            return text
+        except UnicodeEncodeError:
+            why = "it is not valid UTF-8 text"
+    raise ValueError(f"kill switch path {path!r} can never be engaged: {why}")
+
+
+def _absence_is_proven(path: str) -> bool:
+    """`path` is absent. True if the nearest ancestor that exists is a directory.
+
+    Raises OSError when that ancestor is a symlink to nothing (a volume that
+    went away) or cannot be checked.
+    """
+    level = path
+    while True:
+        up = os.path.dirname(level) or os.curdir
+        if up == level:
+            raise FileNotFoundError(path)  # nothing above it exists
+        level = up
+        try:
+            os.lstat(level)
+        except FileNotFoundError:
+            continue
+        return stat.S_ISDIR(os.stat(level).st_mode)
 
 
 def _unusual(mode: int) -> str:
@@ -49,8 +95,8 @@ class KillSwitch:
     switch is clear.
     """
 
-    def __init__(self, path: str) -> None:
-        self.path = path
+    def __init__(self, path: Union[str, bytes, os.PathLike]) -> None:
+        self.path: str = _usable(path)
 
     @property
     def engaged(self) -> bool:
@@ -60,12 +106,18 @@ class KillSwitch:
         try:
             os.lstat(self.path)
         except FileNotFoundError:
-            return False
+            pass
         except (OSError, ValueError):
             # Cannot determine -> treat as engaged. See module docstring.
-            # ValueError: lstat rejects a path with a NUL byte before the OS.
+            # ValueError: a NUL byte or lone surrogate, if `path` was changed
+            # after construction; lstat rejects those before the OS sees them.
             return True
-        return True
+        else:
+            return True
+        try:
+            return not _absence_is_proven(self.path)
+        except (OSError, ValueError):
+            return True
 
     @property
     def reason(self) -> str:
