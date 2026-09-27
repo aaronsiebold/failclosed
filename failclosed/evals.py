@@ -2,7 +2,7 @@
 
 A normal test asserts an output equals a value. That contract does not hold for
 a model: the same prompt returns something different each call, and the honest
-statement about behaviour is not "it works" but "it works about nine times in
+statement about behavior is not "it works" but "it works about nine times in
 ten." Asserting on one sample of a distribution gives you a suite that goes red
 on Tuesday for no reason, and a team that learns to re-run red suites — which
 costs more than having no suite at all.
@@ -14,7 +14,7 @@ So a case here runs `trials` times and asserts on the **rate**:
 
 Two thresholds, because they answer different questions:
 
-* `min_pass_rate` is the floor. Below it, the behaviour is broken.
+* `min_pass_rate` is the floor. Below it, the behavior is broken.
 * the recorded **baseline** is what it did last time. A case that ran at 0.98
   and now runs at 0.82 has regressed even though 0.82 clears a 0.80 floor, and
   that is the signal you actually want — drift is visible in the second
@@ -38,7 +38,7 @@ __all__ = ["Case", "CaseResult", "Report", "Suite", "Baseline"]
 
 @dataclass
 class Case:
-    """One behaviour, measured over repeated trials.
+    """One behavior, measured over repeated trials.
 
     `run` produces an output. `check` says whether that output is acceptable.
     Splitting them means a failure report can show you *what came back*, which

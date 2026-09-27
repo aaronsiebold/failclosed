@@ -29,7 +29,7 @@ The gate then catches `Exception` broadly, which normally deserves a code
 review objection. Here it is the entire point. A guard that raises `KeyError` on
 a malformed action has not passed. The alternative — letting it propagate — puts
 the decision in the hands of whatever `try` block happens to be up the stack,
-which is exactly how fail-open behaviour gets in.
+which is exactly how fail-open behavior gets in.
 
 ## Why the ledger refuses instead of returning False
 
@@ -66,6 +66,49 @@ default, not a law — pass `max_staleness` per ledger.
 The direction of the tradeoff is the point: a window too short causes visible,
 annoying, self-correcting refusals; a window too long causes invisible wrong
 answers. Prefer the annoying failure.
+
+## When a missing kill switch counts as clear
+
+`engaged` is presence-based, so the hard case is absence. A missing file reads
+clear only when its absence is proven: the nearest directory above it that
+exists is a real directory. `touch state/HALT` fails when `state/` is missing,
+and `engage()` creates the directory first, so nobody can have engaged a switch
+inside a directory that does not exist. A missing directory proves the switch
+is off.
+
+A symlink to nothing proves nothing. If `state/` points at a volume that is not
+mounted, the switch may be sitting on that volume. That is the "disk that went
+away" case, and it reads engaged. So does a symlink loop, a file where a
+directory should be, and any directory that cannot be searched.
+
+One case this cannot see: an unmounted mount point is an ordinary empty
+directory, so a switch that lives on a network mount reads clear while the mount
+is gone. If that matters, keep the switch on local disk.
+
+## Why a bad kill-switch path fails at construction
+
+An empty path, a NUL byte, or a name that is not UTF-8 text can never hold a
+file. `lstat` finds nothing there, so the switch reads clear, and `engage()`
+raises, so it can never read anything else. The constructor raises `ValueError`
+instead.
+
+Reading such a switch as engaged would also fail closed. I chose the error
+because the fault is known before any filesystem is asked, and a typo in config
+should stop the program at startup rather than hold every send at 2am with a
+reason that points at a file nobody can find.
+
+## Why the kill switch checks the type before it reads
+
+A FIFO at the switch path blocks `open()` until something writes to it, and
+`/dev/zero` never runs out of bytes. The first left `Gate.evaluate` waiting
+forever. The second read until memory ran out. Neither allowed anything, but a
+gate that never answers is an outage of its own.
+
+So `reason` stats the path and reads only a regular file. Anything else answers
+with its type ("unusual file type (FIFO), not read"). The open uses
+`O_NONBLOCK` and the type is checked again on the open descriptor, in case a
+FIFO replaced the file between the two calls. The read stops at 1 KiB, because
+the reason goes into one-line logs.
 
 ## Why mutation sites come from tokenize
 
@@ -112,21 +155,25 @@ Two things worth keeping from it:
 
 ## Why not chase 100% mutation score
 
-Three survivors remain and are documented in the README. Two are `sort_keys=True`
-in a `json.dumps` call — key ordering, not behaviour. One is
-`abs(drift) >= 0.01`, where `0.01` has no exact binary float representation, so
-no input can distinguish `>` from `>=`.
+Two survivors remain and are documented in the README. Both are `sort_keys=True`
+in a `json.dumps` call — key ordering, not behavior.
 
-Killing them would mean asserting on serialised byte order and constructing a
-float equality that cannot occur — tests that make the suite harder to change
-and catch nothing. The number is a diagnostic, not a target. What matters is
-being able to say which claims are unchecked and why.
+Killing them would mean asserting on serialized byte order — a test that makes
+the suite harder to change and catches nothing. The number is a diagnostic, not
+a target. What matters is being able to say which claims are unchecked and why.
+
+There used to be a third: `abs(drift) >= 0.01`, excused because `0.01` has no
+exact binary float representation, so no input could distinguish `>` from `>=`.
+That reason was wrong. In binary, 1/50 is exactly twice 0.01, so
+`1/50 - 0.01 == 0.01`, and a case that passes 1 of 50 trials against a 0.01
+baseline lands on the boundary. A test kills that mutant now. The reason next to
+an allow-list entry is a claim too, and nobody had checked that one.
 
 ## Why no dependencies
 
 A reviewer can clone this and run it in one command with no virtualenv, no
 install step and no version resolution. For a library this small, `pytest`
-would buy nicer parametrisation and cost that. `unittest` was already there.
+would buy nicer parametrization and cost that. `unittest` was already there.
 
 The eval harness is the place a dependency would be most defensible — but its
 job is to run a callable N times and count, and that is not a hard problem worth

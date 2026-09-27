@@ -13,6 +13,7 @@ import unittest
 
 from failclosed.mutate import (
     ALLOW_FILE,
+    MUTANT_ENV,
     Mutation,
     Survivor,
     _apply,
@@ -201,6 +202,11 @@ class EnvironmentTests(unittest.TestCase):
         # mtime and size is reused, so a mutant can run stale bytecode and be
         # reported as a survivor it never was.
         self.assertEqual(_child_env()["PYTHONDONTWRITEBYTECODE"], "1")
+
+    def test_mutant_runs_are_marked_so_text_checks_can_stand_down(self):
+        # tests/test_readme.py compares the README with the source. Under a
+        # mutant it would fail on every cited line and count as a kill.
+        self.assertEqual(_child_env()[MUTANT_ENV], "1")
 
     def test_the_rest_of_the_environment_is_inherited(self):
         os.environ["FAILCLOSED_TEST_MARKER"] = "present"

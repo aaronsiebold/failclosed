@@ -3,7 +3,7 @@
 [![ci](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml/badge.svg)](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![mutation score](https://img.shields.io/badge/mutants%20killed-45%2F48-brightgreen)
+![mutation score](https://img.shields.io/badge/mutants%20killed-54%2F56-brightgreen)
 
 **A guard that stays green when you inject a violation is asserting nothing.**
 
@@ -12,7 +12,7 @@ system. It had tests. The tests passed. The tests also passed with the guard's
 body deleted — they exercised the function and asserted on the wrong thing.
 Nothing in a green CI badge would ever have told me.
 
-This library is the pattern that came out of fixing it, generalised and written
+This library is the pattern that came out of fixing it, generalized and written
 from scratch. Three ideas, each small:
 
 1. **An action that cannot be proven safe does not happen.** Unknown and no are
@@ -28,7 +28,7 @@ Python 3.9+, standard library only. No dependencies, nothing to install.
 ```bash
 git clone https://github.com/aaronsiebold/failclosed
 cd failclosed
-python3 -m unittest discover -s tests   # 119 tests, ~0.1s
+python3 -m unittest discover -s tests   # 166 tests, under a second
 python3 examples/outbound.py            # the worked example
 python3 -m failclosed.mutate            # break the code, watch tests catch it
 ```
@@ -150,8 +150,8 @@ Two thresholds, answering different questions:
 
 | | question | fails when |
 |---|---|---|
-| `min_pass_rate` | is this behaviour broken? | rate drops below a fixed floor |
-| baseline + `drift_tolerance` | has it got worse? | rate falls well below last run |
+| `min_pass_rate` | is this behavior broken? | rate drops below a fixed floor |
+| baseline + `drift_tolerance` | has it gotten worse? | rate falls well below last run |
 
 The second is the one you actually want. A case that ran at 98% and now runs at
 82% has regressed, even though 82% clears an 80% floor somebody picked months
@@ -180,39 +180,39 @@ no mutation sites at all.
 ```
 $ python3 -m failclosed.mutate
 
-48 mutation site(s) across 5 file(s)
+56 mutation site(s) across 5 file(s)
 
-  [  1/48] killed   failclosed/evals.py:58 < -> <=
-  [  2/48] killed   failclosed/evals.py:60 <= -> <
+  [  1/56] killed   failclosed/evals.py:58 < -> <=
+  [  2/56] killed   failclosed/evals.py:60 not  -> (deleted)
   ...
-  [ 48/48] killed   failclosed/ledger.py:156 not  -> (deleted)
+  [ 56/56] killed   failclosed/ledger.py:162 not  -> (deleted)
 
-45/48 mutants killed  (93.8%)  in 20.1s
+54/56 mutants killed  (96.4%)  in 738.8s     # on a Mac under heavy load
 
-3 known equivalent mutant(s), allow-listed:
+2 known equivalent mutant(s), allow-listed:
 
-  failclosed/evals.py:107 >= -> >
-      0.01 has no exact binary float representation, so the equality case is
-      unreachable and no input distinguishes > from >=
-  failclosed/evals.py:142 True -> False
-      sort_keys changes key order in the serialised JSON, not behaviour
+  failclosed/evals.py:146 True -> False
+      sort_keys changes key order in the serialized JSON, not behavior; the file round-trips identically either way
   failclosed/ledger.py:55 True -> False
-      as above: byte order of a serialised entry, not behaviour
+      as above: byte order of a serialized entry, not behavior
 ```
 
-**All three survivors are equivalent mutants**, listed in `.mutants-allow` with
+**Both survivors are equivalent mutants**, listed in `.mutants-allow` with
 a reason each. Anything *not* on that list fails the build:
 
-- `abs(drift) >= 0.01` — `0.01` has no exact binary float representation, so the
-  equality case is unreachable and `>` and `>=` cannot be distinguished by any
-  input. A test here would be theatre.
-- `sort_keys=True` (twice) — changes the byte order of keys in serialised JSON,
-  not behaviour. Both files round-trip identically either way.
+- `sort_keys=True` (twice) — changes the byte order of keys in serialized JSON,
+  not behavior. Both files round-trip identically either way.
 
-Chasing 100% would mean asserting on serialised byte order and constructing a
-float equality that cannot occur — tests that make the suite harder to change
-and catch nothing. The number is not the goal; knowing *which* claims are
-unchecked is.
+Chasing 100% would mean asserting on serialized byte order — a test that makes
+the suite harder to change and catches nothing. The number is not the goal;
+knowing *which* claims are unchecked is.
+
+The list used to have a third entry, and its reason was wrong.
+`abs(drift) >= 0.01` was excused because 0.01 has no exact binary float
+representation, so the equality case looked unreachable. It is reachable. In
+binary, 1/50 is exactly twice 0.01, so `1/50 - 0.01 == 0.01` holds in Python,
+and a case that passes 1 of 50 trials against a 0.01 baseline sits right on the
+boundary. A test pins it now.
 
 The allow-list is keyed on the source line, not the line number. A
 line-numbered allow-list silently starts excusing a different mutant the moment
@@ -221,16 +221,27 @@ safety allow-list.
 
 ### Does it actually catch anything?
 
-Delete the two tests that pin the kill switch's fail-closed branch and rerun:
+Skip the six tests that pin the kill switch's fail-closed branch, with a
+`@unittest.skip` on each (deleting them would trip the README check, which
+counts the suite):
+
+- `test_an_unreadable_switch_reports_engaged`
+- `test_a_switch_that_cannot_be_checked_is_truthy`
+- `test_a_path_the_os_rejects_is_engaged_and_raises_nothing`
+- `test_a_gate_in_front_of_it_refuses_and_raises_nothing`
+- `test_a_file_where_the_parent_should_be_reads_engaged`
+- `test_a_symlink_loop_as_the_parent_reads_engaged`
+
+Then rerun:
 
 ```
 $ python3 -m unittest discover -s tests
-OK                                    # 117 tests, still green
+OK (skipped=6)                        # 166 tests, still green
 
 $ python3 -m failclosed.mutate
 1 SURVIVOR(S) — no test objected to these changes:
 
-  failclosed/killswitch.py:45 True -> False
+  failclosed/killswitch.py:114 True -> False
       return True
 $ echo $?
 1
@@ -276,6 +287,16 @@ Two properties matter more than the feature:
   answer is stop. Any other design makes the switch useless in exactly the
   conditions that would make you reach for it.
 
+The second property settles the edge cases too. A path no file can ever have
+(empty, a NUL byte, not UTF-8 text) is refused when the `KillSwitch` is built,
+because that switch could never be engaged and would read clear forever. A
+missing file reads clear only when its absence is proven: a missing directory
+proves it, since nobody can create a file inside one, but a directory that is a
+symlink to an unmounted volume proves nothing, so the switch reads engaged. And
+whatever sits at the path, the check comes back. A FIFO or a device is reported
+by its type and never read, so a gate cannot hang on it. The reasoning is in
+[docs/DESIGN.md](docs/DESIGN.md).
+
 ---
 
 ## The worked example
@@ -296,7 +317,7 @@ conventional chain lets three through:
 Case 3 is the one worth reading twice: our own records had no idea, and the send
 still stopped, because the ledger is synced from where the action really
 happens. Case 4 is the one that is hardest to get right: nothing failed, no
-guard changed, and the correct behaviour is still to stop.
+guard changed, and the correct behavior is still to stop.
 
 ---
 
@@ -308,7 +329,7 @@ failclosed/ledger.py      Ledger, StaleLedger                 — a record that 
 failclosed/killswitch.py  KillSwitch                          — one file that stops everything
 failclosed/evals.py       Case, Suite, Baseline, Report       — rate-based eval + drift detection
 failclosed/mutate.py      the mutation runner (excluded from mutation; tested directly)
-tests/                    119 tests, standard library unittest — incl. test_mutate.py
+tests/                    166 tests, standard library unittest — incl. test_mutate.py
 examples/outbound.py      five staged failures against one gate
 docs/DESIGN.md            why each decision went the way it did
 ```

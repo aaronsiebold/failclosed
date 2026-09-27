@@ -59,6 +59,11 @@ NOT_TOKEN = "not"
 
 DEFAULT_TEST_CMD = [sys.executable, "-m", "unittest", "discover", "-q", "-s", "tests"]
 
+#: Set to "1" in every mutant's test run. A test that compares the source with
+#: something outside it, like the README, must stand down when it sees this:
+#: the source is wrong on purpose there, and a text mismatch is not a kill.
+MUTANT_ENV = "FAILCLOSED_MUTANT_RUN"
+
 
 @dataclass(frozen=True)
 class Mutation:
@@ -98,7 +103,7 @@ def load_allowed(root: str) -> Dict[str, str]:
     """Known equivalent mutants: `key  # why it cannot be killed`.
 
     Equivalent mutants are real — `sort_keys=True` changes byte order, not
-    behaviour, and no input distinguishes them. The choice is between an
+    behavior, and no input distinguishes them. The choice is between an
     allow-list with a stated reason per entry and a permanently red build that
     everyone learns to ignore. The first is honest; the second is decoration.
     """
@@ -170,6 +175,7 @@ def _child_env() -> Dict[str, str]:
     """
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env[MUTANT_ENV] = "1"
     return env
 
 
@@ -245,7 +251,7 @@ def run(
                     )
                     survived = proc.returncode == 0
                 except subprocess.TimeoutExpired:
-                    # A hang is a detected mutant: behaviour changed observably.
+                    # A hang is a detected mutant: behavior changed observably.
                     survived = False
             finally:
                 with open(full, "w", encoding="utf-8") as fh:
