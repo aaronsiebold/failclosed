@@ -119,6 +119,15 @@ class Gate:
 
     def evaluate(self, action: Any) -> Decision:
         """Return a `Decision`. Never raises, and never allows by accident."""
+        try:
+            return self._evaluate(action)
+        except Exception as exc:  # noqa: BLE001 - a gate that cannot finish has not allowed
+            # Reached only when describing a failure fails too: an exception
+            # whose __str__ raises, or a guard whose name cannot be read.
+            log.exception("gate could not finish; refusing")
+            return Decision(False, f"gate could not finish ({type(exc).__name__})", guard="gate")
+
+    def _evaluate(self, action: Any) -> Decision:
         if self._killswitch is not None:
             try:
                 engaged = bool(self._killswitch.engaged)

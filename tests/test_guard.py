@@ -123,18 +123,30 @@ class GateTests(unittest.TestCase):
 
     def test_engaged_killswitch_whose_reason_raises_still_denies(self):
         # evaluate() never raises: a switch that is engaged but cannot say why
-        # is still engaged.
-        class Engaged:
-            engaged = True
+        # is still engaged. Several exception types, so a handler narrowed to
+        # the one a test happens to raise cannot pass.
+        class Custom(Exception):
+            pass
 
-            @property
-            def reason(self):
-                raise RuntimeError("switch backend down")
+        for exc in (RuntimeError("switch backend down"), KeyError("reason"),
+                    TypeError("not a str"), OSError("disk gone"),
+                    ValueError("bad path"), Custom("anything else")):
+            with self.subTest(type(exc).__name__):
 
-        d = Gate(allows, killswitch=Engaged()).evaluate(Action())
-        self.assertFalse(d.allowed)
-        self.assertEqual(d.guard, "killswitch")
-        self.assertIn("reason unreadable (RuntimeError: switch backend down)", d.reason)
+                class Engaged:
+                    engaged = True
+
+                    @property
+                    def reason(self, exc=exc):
+                        raise exc
+
+                d = Gate(allows, killswitch=Engaged()).evaluate(Action())
+                self.assertFalse(d.allowed)
+                self.assertEqual(d.guard, "killswitch")
+                self.assertEqual(
+                    d.reason,
+                    f"kill switch engaged: reason unreadable ({type(exc).__name__}: {exc})",
+                )
 
     def test_engaged_killswitch_without_reason_still_denies(self):
         class Engaged:
@@ -166,6 +178,71 @@ class GateTests(unittest.TestCase):
 def _refuse():
     raise Refuse("not ok")
 
+
+
+class Unprintable(Exception):
+    """An exception whose own __str__ is broken, as buggy user code can be."""
+
+    def __str__(self):
+        raise AttributeError("no .msg: __init__ never set it")
+
+
+class NeverRaisesTests(unittest.TestCase):
+    """evaluate() returns a refusal even when describing the failure fails."""
+
+    def assertRefused(self, gate):
+        with self.assertLogs("failclosed", level=logging.ERROR):
+            d = gate.evaluate(Action())
+        self.assertIsInstance(d, Decision)
+        self.assertFalse(d.allowed)
+        return d
+
+    def test_a_guard_raising_an_unprintable_exception(self):
+        def g(action):
+            raise Unprintable()
+
+        d = self.assertRefused(Gate(g))
+        self.assertEqual(d.guard, "gate")
+        self.assertEqual(d.reason, "gate could not finish (AttributeError)")
+
+    def test_a_refusal_that_cannot_be_printed_is_still_a_refusal(self):
+        class BadRefuse(Refuse):
+            def __str__(self):
+                raise AttributeError("broken")
+
+        def g(action):
+            raise BadRefuse()
+
+        self.assertRefused(Gate(g))
+
+    def test_a_guard_whose_name_cannot_be_read(self):
+        class Nameless:
+            def __call__(self, action):
+                return None
+
+            def __getattr__(self, name):
+                raise RuntimeError(f"no attribute lookups here ({name})")
+
+        self.assertRefused(Gate(Nameless()))
+
+    def test_a_killswitch_whose_engaged_raises_an_unprintable_exception(self):
+        class Broken:
+            @property
+            def engaged(self):
+                raise Unprintable()
+
+        ran = []
+        self.assertRefused(Gate(lambda a: ran.append(1), killswitch=Broken()))
+        self.assertEqual(ran, [])
+
+    def test_a_killswitch_whose_reason_cannot_be_formatted(self):
+        class Engaged:
+            engaged = True
+            reason = Unprintable()  # truthy, and str() of it raises
+
+        ran = []
+        self.assertRefused(Gate(lambda a: ran.append(1), killswitch=Engaged()))
+        self.assertEqual(ran, [])
 
 
 class ImmutabilityTests(unittest.TestCase):
