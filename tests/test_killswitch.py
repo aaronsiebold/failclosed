@@ -1,6 +1,9 @@
 import os
+import stat
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 from failclosed import Gate, KillSwitch
 
@@ -54,11 +57,10 @@ class KillSwitchTests(unittest.TestCase):
         self.switch.engage("x")
         self.assertIn("ENGAGED", repr(self.switch))
 
-    def test_unreadable_reason_does_not_raise(self):
-        # A directory where a file is expected: exists() is True, read fails.
+    def test_a_directory_at_the_path_is_engaged_and_never_read(self):
         os.makedirs(self.path, exist_ok=True)
         self.assertTrue(self.switch.engaged)
-        self.assertEqual(self.switch.reason, "")
+        self.assertEqual(self.switch.reason, "unusual file type (directory), not read")
 
 
 
@@ -157,6 +159,124 @@ class PathTheOSRejectsTests(unittest.TestCase):
         for label, path in self.paths.items():
             with self.subTest(label):
                 self.assertIsNone(KillSwitch(path).engaged_at)
+
+
+def finishes(fn, seconds=30.0):
+    """Run fn in a daemon thread: [its result], or [] if it never came back.
+
+    A blocked open() cannot be interrupted, so the thread is the only way to
+    turn "hangs forever" into a failing assertion instead of a stuck suite.
+    """
+    box = []
+    t = threading.Thread(target=lambda: box.append(fn()), daemon=True)
+    t.start()
+    t.join(seconds)
+    return box
+
+
+@unittest.skipUnless(hasattr(os, "mkfifo"), "no FIFOs on this platform")
+class NeverBlocksTests(unittest.TestCase):
+    """Whatever sits at the switch path, the answer comes back.
+
+    A FIFO blocks open() until a writer shows up, and a device like /dev/zero
+    never runs out of bytes, so reading either one would hang the Gate in
+    front of it. The type decides first; only a regular file is ever read.
+    """
+
+    FIFO = "unusual file type (FIFO), not read"
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
+        self.fifo = os.path.join(self.dir, "HALT")
+        os.mkfifo(self.fifo)
+
+    def tearDown(self):
+        # If a reader is stuck in open(), a writer arriving releases it.
+        try:
+            os.close(os.open(self.fifo, os.O_WRONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+
+    def test_a_fifo_is_engaged_and_its_reason_comes_back_unread(self):
+        switch = KillSwitch(self.fifo)
+        self.assertTrue(switch.engaged)
+        self.assertEqual(finishes(lambda: switch.reason), [self.FIFO])
+
+    def test_a_gate_in_front_of_a_fifo_returns_a_refusal(self):
+        gate = Gate(lambda a: None, killswitch=KillSwitch(self.fifo))
+        out = finishes(lambda: gate.evaluate("x"))
+        self.assertEqual(len(out), 1, "Gate.evaluate never returned")
+        self.assertFalse(out[0].allowed)
+        self.assertEqual(out[0].guard, "killswitch")
+        self.assertEqual(out[0].reason, "kill switch engaged: " + self.FIFO)
+
+    def test_a_symlink_to_a_fifo_is_judged_by_what_it_points_at(self):
+        link = os.path.join(self.dir, "LINK")
+        os.symlink(self.fifo, link)
+        switch = KillSwitch(link)
+        self.assertTrue(switch.engaged)
+        self.assertEqual(finishes(lambda: switch.reason), [self.FIFO])
+
+    def test_a_fifo_swapped_in_after_the_type_check_is_still_not_read(self):
+        # Between the type check and the open, a regular file can become a
+        # FIFO. Make stat lie to stage that race: the open must not block,
+        # and the type seen on the open descriptor decides.
+        real_stat = os.stat
+
+        def says_regular(path, *args, **kwargs):
+            st = real_stat(path, *args, **kwargs)
+            if path == self.fifo:
+                return os.stat_result((stat.S_IFREG | 0o644,) + tuple(st)[1:])
+            return st
+
+        switch = KillSwitch(self.fifo)
+        with mock.patch("os.stat", says_regular):
+            self.assertEqual(finishes(lambda: switch.reason), [self.FIFO])
+
+    def test_a_socket_is_named_by_type_without_being_opened(self):
+        import socket
+
+        if not hasattr(socket, "AF_UNIX"):
+            self.skipTest("no UNIX sockets here")
+        path = os.path.join(self.dir, "SOCK")
+        with socket.socket(socket.AF_UNIX) as s:
+            s.bind(path)
+        switch = KillSwitch(path)
+        self.assertTrue(switch.engaged)
+        self.assertEqual(switch.reason, "unusual file type (socket), not read")
+
+    def test_a_device_is_engaged_and_never_read(self):
+        if not stat.S_ISCHR(os.stat(os.devnull).st_mode):
+            self.skipTest("os.devnull is not a character device here")
+        switch = KillSwitch(os.devnull)
+        self.assertTrue(switch.engaged)
+        self.assertEqual(
+            finishes(lambda: switch.reason),
+            ["unusual file type (character device), not read"],
+        )
+
+
+class BoundedReadTests(unittest.TestCase):
+    """The reason goes into single-line logs. A huge file must not."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="failclosed-test-")
+        self.path = os.path.join(self.dir, "HALT")
+
+    def write(self, data):
+        with open(self.path, "wb") as fh:
+            fh.write(data)
+
+    def test_reason_is_at_most_the_first_kib(self):
+        self.write(b"x" * 100_000)  # no newline anywhere
+        self.assertEqual(KillSwitch(self.path).reason, "x" * 1024)
+
+    def test_a_character_cut_at_the_limit_does_not_lose_the_reason(self):
+        # 1 + 2*1000 bytes: the 1024-byte cut splits the 512th "é".
+        self.write(("a" + "é" * 1000).encode("utf-8"))
+        reason = KillSwitch(self.path).reason
+        self.assertTrue(reason.startswith("aé"), reason[:10])
+        self.assertEqual(reason, "a" + "é" * 511 + "\ufffd")
 
 
 class ReasonFormattingTests(unittest.TestCase):

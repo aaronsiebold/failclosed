@@ -13,10 +13,26 @@ Two properties matter more than the feature itself:
 from __future__ import annotations
 
 import os
+import stat
 import time
 from typing import Optional
 
 __all__ = ["KillSwitch"]
+
+#: `reason` reads at most this many bytes: it goes into one-line logs.
+REASON_BYTES = 1024
+
+_KINDS = {
+    stat.S_IFDIR: "directory",
+    stat.S_IFIFO: "FIFO",
+    stat.S_IFSOCK: "socket",
+    stat.S_IFCHR: "character device",
+    stat.S_IFBLK: "block device",
+}
+
+
+def _unusual(mode: int) -> str:
+    return f"unusual file type ({_KINDS.get(stat.S_IFMT(mode), 'unknown')}), not read"
 
 
 class KillSwitch:
@@ -53,20 +69,39 @@ class KillSwitch:
 
     @property
     def reason(self) -> str:
-        """The human's stated reason — the first line only.
+        """The human's stated reason — the first line, at most `REASON_BYTES`.
 
         `engage()` also writes a timestamp line, and callers put this string
         into single-line logs and alerts, so returning the whole file would
         wrap every one of them.
+
+        Only a regular file is read. A FIFO blocks `open()` until a writer
+        arrives and a device like /dev/zero never ends, so either would hang
+        the Gate in front of it. Anything else answers with its type instead.
         """
         try:
-            with open(self.path, "r", encoding="utf-8") as fh:
-                first = fh.readline().strip()
+            mode = os.stat(self.path).st_mode
+            if not stat.S_ISREG(mode):
+                return _unusual(mode)
+            # O_NONBLOCK: if a FIFO replaced the file since the stat, the
+            # open returns at once, and the fstat below catches the swap.
+            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         except (OSError, ValueError):
-            # ValueError covers UnicodeDecodeError (a file that is not UTF-8)
-            # and a path the OS rejects (NUL byte, lone surrogate), which
-            # `engaged` answers True for. Unreadable reason -> "".
+            # Absent, unreadable, or a path the OS rejects: no reason to give.
+            # ValueError is a NUL byte or a lone surrogate in the path.
             return ""
+        try:
+            mode = os.fstat(fd).st_mode
+            if not stat.S_ISREG(mode):
+                return _unusual(mode)
+            head = os.read(fd, REASON_BYTES)
+        except OSError:
+            return ""
+        finally:
+            os.close(fd)
+        # "replace": a cut through a multi-byte character, or a file that is
+        # not UTF-8, still shows the human's words rather than nothing.
+        first = head.split(b"\n", 1)[0].decode("utf-8", "replace").strip()
         return "" if first.startswith("engaged ") else first
 
     @property
