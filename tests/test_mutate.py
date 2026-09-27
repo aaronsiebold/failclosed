@@ -155,6 +155,19 @@ class AllowListTests(unittest.TestCase):
     def test_missing_file_allows_nothing(self):
         self.assertEqual(load_allowed(self.tmp), {})
 
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads anything")
+    def test_an_unreadable_file_raises_instead_of_allowing_nothing(self):
+        # Allowing nothing would still fail the build, but it would blame
+        # every allow-listed mutant instead of naming the real fault.
+        self.write_allow("a.py :: x = True :: True->False  # reason\n")
+        path = os.path.join(self.tmp, ALLOW_FILE)
+        os.chmod(path, 0)
+        try:
+            with self.assertRaises(PermissionError):
+                load_allowed(self.tmp)
+        finally:
+            os.chmod(path, 0o600)
+
     def test_parses_an_entry_and_its_reason(self):
         self.write_allow("a.py :: x = True :: True->False  # byte order only\n")
         allowed = load_allowed(self.tmp)

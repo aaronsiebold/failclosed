@@ -104,9 +104,13 @@ def load_allowed(root: str) -> Dict[str, str]:
     """
     path = os.path.join(root, ALLOW_FILE)
     allowed: Dict[str, str] = {}
-    if not os.path.exists(path):
+    # Not os.path.exists(): it answers False for a file it cannot read.
+    # Only a file that is truly absent means an empty allow-list.
+    try:
+        fh = open(path, "r", encoding="utf-8")
+    except FileNotFoundError:
         return allowed
-    with open(path, "r", encoding="utf-8") as fh:
+    with fh:
         for raw in fh:
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
