@@ -9,6 +9,5 @@
 # Anything NOT listed here fails the build. Add an entry only when you can say
 # why no test could ever catch it. "Hard to test" is not a reason.
 
-failclosed/evals.py :: elif self.drift is not None and abs(self.drift) >= 0.01: :: >=->>  # 0.01 has no exact binary float representation, so the equality case is unreachable and no input distinguishes > from >=
 failclosed/evals.py :: json.dump(payload, fh, indent=2, sort_keys=True) :: True->False  # sort_keys changes key order in the serialised JSON, not behaviour; the file round-trips identically either way
 failclosed/ledger.py :: return json.dumps({"key": self.key, "at": self.at, "meta": self.meta}, sort_keys=True) :: True->False  # as above: byte order of a serialised entry, not behaviour

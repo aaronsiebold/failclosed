@@ -265,6 +265,14 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(r.drift, -0.25)
         self.assertTrue(r.regressed)
 
+    def test_a_drift_of_exactly_one_point_is_shown(self):
+        # The summary shows drift from 0.01 up. That boundary is reachable:
+        # 1/50 is 2 * 0.01 bit for bit, so 1/50 - 0.01 is exactly 0.01.
+        r = CaseResult(name="x", passes=1, trials=50, min_pass_rate=0.0,
+                       baseline_rate=0.01)
+        self.assertEqual(r.drift, 0.01)
+        self.assertIn("drift +1%", r.summary())
+
     def test_summary_does_not_cry_regression_on_a_healthy_case(self):
         report = Suite([Case("a", run=lambda: "ok", check=is_ok, trials=4)]).run()
         line = report.results[0].summary()
