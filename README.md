@@ -28,7 +28,7 @@ Python 3.9+, standard library only. No dependencies, nothing to install.
 ```bash
 git clone https://github.com/aaronsiebold/failclosed
 cd failclosed
-python3 -m unittest discover -s tests   # 166 tests, under a second
+python3 -m unittest discover -s tests   # 168 tests, under a second
 python3 examples/outbound.py            # the worked example
 python3 -m failclosed.mutate            # break the code, watch tests catch it
 ```
@@ -236,7 +236,7 @@ Then rerun:
 
 ```
 $ python3 -m unittest discover -s tests
-OK (skipped=6)                        # 166 tests, still green
+OK (skipped=6)                        # 168 tests, still green
 
 $ python3 -m failclosed.mutate
 1 SURVIVOR(S) — no test objected to these changes:
@@ -329,7 +329,7 @@ failclosed/ledger.py      Ledger, StaleLedger                 — a record that 
 failclosed/killswitch.py  KillSwitch                          — one file that stops everything
 failclosed/evals.py       Case, Suite, Baseline, Report       — rate-based eval + drift detection
 failclosed/mutate.py      the mutation runner (excluded from mutation; tested directly)
-tests/                    166 tests, standard library unittest — incl. test_mutate.py
+tests/                    168 tests, standard library unittest — incl. test_mutate.py
 examples/outbound.py      five staged failures against one gate
 docs/DESIGN.md            why each decision went the way it did
 ```

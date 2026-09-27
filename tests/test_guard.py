@@ -111,15 +111,27 @@ class GateTests(unittest.TestCase):
         self.assertTrue(Gate(allows, killswitch=Clear()).evaluate(Action()))
 
     def test_unreadable_killswitch_denies(self):
-        class Broken:
-            @property
-            def engaged(self):
-                raise OSError("permission denied")
+        # The switch's own handler must answer, not the gate's backstop, so
+        # the refusal names the switch. Several types, so a handler narrowed
+        # to OSError cannot pass by leaving the rest to the backstop.
+        class Custom(Exception):
+            pass
 
-        d = Gate(allows, killswitch=Broken()).evaluate(Action())
-        self.assertFalse(d.allowed)
-        self.assertIn("unreadable", d.reason)
-        self.assertEqual(d.guard, "killswitch")
+        for exc in (OSError("permission denied"), TypeError("not a path"),
+                    ValueError("embedded null byte"), RuntimeError("backend down"),
+                    Custom("anything else")):
+            with self.subTest(type(exc).__name__):
+
+                class Broken:
+                    @property
+                    def engaged(self, exc=exc):
+                        raise exc
+
+                d = Gate(allows, killswitch=Broken()).evaluate(Action())
+                self.assertFalse(d.allowed)
+                self.assertEqual(d.guard, "killswitch")
+                self.assertEqual(
+                    d.reason, f"kill switch unreadable ({type(exc).__name__}: {exc})")
 
     def test_engaged_killswitch_whose_reason_raises_still_denies(self):
         # evaluate() never raises: a switch that is engaged but cannot say why
@@ -187,6 +199,20 @@ class Unprintable(Exception):
         raise AttributeError("no .msg: __init__ never set it")
 
 
+class BrokenStr(Exception):
+    """Raised by the __str__ below: an error type no handler would name."""
+
+
+def unprintable(error):
+    """An Unprintable whose __str__ raises `error` instead."""
+
+    class Broken(Exception):
+        def __str__(self):
+            raise error("broken __str__")
+
+    return Broken()
+
+
 class NeverRaisesTests(unittest.TestCase):
     """evaluate() returns a refusal even when describing the failure fails."""
 
@@ -204,6 +230,20 @@ class NeverRaisesTests(unittest.TestCase):
         d = self.assertRefused(Gate(g))
         self.assertEqual(d.guard, "gate")
         self.assertEqual(d.reason, "gate could not finish (AttributeError)")
+
+    def test_whatever_the_broken_str_raises(self):
+        # The backstop catches every Exception, not the types a test happens
+        # to use. BrokenStr is one no narrowed handler would list.
+        for error in (TypeError, KeyError, ValueError, OSError, BrokenStr):
+            with self.subTest(error.__name__):
+                exc = unprintable(error)
+
+                def g(action, exc=exc):
+                    raise exc
+
+                d = self.assertRefused(Gate(g))
+                self.assertEqual(d.guard, "gate")
+                self.assertEqual(d.reason, f"gate could not finish ({error.__name__})")
 
     def test_a_refusal_that_cannot_be_printed_is_still_a_refusal(self):
         class BadRefuse(Refuse):

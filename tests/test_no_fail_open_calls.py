@@ -1,20 +1,35 @@
 """No module in failclosed/ may ask the filesystem a question that cannot fail.
 
-os.path.exists, lexists, isfile and isdir catch OSError themselves and answer
-False, so "I could not look" comes back as "it is not there". That is the
-fail-open shape this library exists to remove. The modules here call lstat,
-stat or open and handle FileNotFoundError themselves instead.
+The yes/no predicates in os.path and on pathlib.Path (exists, isfile, islink,
+is_dir, is_symlink and the rest) catch OSError themselves and answer False,
+so "I could not look" comes back as "it is not there". That is the fail-open
+shape this library exists to remove. The modules here call lstat, stat or
+open and handle FileNotFoundError themselves instead.
 """
 
 import ast
 import os
+import pathlib
 import sys
 import unittest
 
 import failclosed
 import failclosed.mutate  # noqa: F401 - the package does not import it itself
 
-SWALLOWERS = {"exists", "lexists", "isfile", "isdir"}
+
+def swallowers():
+    """Every predicate that asks the filesystem, derived, not listed by hand.
+
+    The pure ones (isabs, is_absolute, ...) only read the string, so they
+    have no OSError to swallow.
+    """
+    asks = {n for n in dir(os.path) if n.startswith("is") or n.endswith("exists")}
+    asks |= {n for n in dir(pathlib.Path) if n.startswith("is_") or n == "exists"}
+    pure = {n for n in dir(pathlib.PurePath) if n.startswith("is_")} | {"isabs", "isreserved"}
+    return asks - pure
+
+
+SWALLOWERS = swallowers()
 PKG = os.path.dirname(os.path.abspath(failclosed.__file__))
 
 
@@ -22,15 +37,21 @@ def offenses(source, filename="<source>"):
     """(line, name) for every use of a swallowing predicate in `source`.
 
     Any attribute or import by these names counts, whatever it is reached
-    through (os.path, an alias, pathlib), so comments and docstrings are
-    the only places the words may appear.
+    through (os.path, an alias, pathlib). So does a string that is exactly
+    one of the names, which is how getattr(os.path, "exists") spells it, and
+    any `import *`, which brings in names this scan cannot see. Comments,
+    docstrings and other strings are the only places the words may appear.
     """
     found = []
     for node in ast.walk(ast.parse(source, filename)):
         if isinstance(node, ast.Attribute) and node.attr in SWALLOWERS:
             found.append((node.lineno, node.attr))
         elif isinstance(node, ast.ImportFrom):
-            found.extend((node.lineno, a.name) for a in node.names if a.name in SWALLOWERS)
+            found.extend((node.lineno, a.name) for a in node.names
+                         if a.name in SWALLOWERS or a.name == "*")
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and node.value in SWALLOWERS):
+            found.append((node.lineno, node.value))
     return found
 
 
@@ -71,9 +92,27 @@ class NoFailOpenCallsTests(unittest.TestCase):
             "from os.path import isdir\n",
             "from os import path\npath.isdir(p)\n",
             "from pathlib import Path\nPath(p).exists()\n",
+            "import os\nos.path.islink(p)\n",
+            "import os\nos.path.ismount(p)\n",
+            "from pathlib import Path\nPath(p).is_file()\n",
+            "from pathlib import Path\nPath(p).is_dir()\n",
+            "from pathlib import Path\nPath(p).is_symlink()\n",
+            "from os.path import *\nexists(p)\n",
+            "import os\ngetattr(os.path, 'exists')(p)\n",
+            "import os\nvars(os.path)['isfile'](p)\n",
         ):
             with self.subTest(source):
                 self.assertTrue(offenses(source))
+
+    def test_the_banned_set_holds_every_predicate_the_scan_was_built_for(self):
+        # A derivation that broke would ban nothing and pass. These are the
+        # ones every supported Python has; newer ones add more.
+        self.assertLessEqual(
+            {"exists", "lexists", "isfile", "isdir", "islink", "ismount",
+             "is_file", "is_dir", "is_symlink", "is_mount", "is_fifo", "is_socket"},
+            SWALLOWERS,
+        )
+        self.assertFalse(SWALLOWERS & {"isabs", "is_absolute", "is_relative_to"})
 
     def test_the_scanner_ignores_comments_docstrings_and_strings(self):
         source = (
