@@ -3,7 +3,7 @@
 [![ci](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml/badge.svg)](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![mutation score](https://img.shields.io/badge/mutants%20killed-54%2F56-brightgreen)
+![mutation score](https://img.shields.io/badge/mutants%20killed-55%2F57-brightgreen)
 
 **A guard that stays green when you inject a violation is asserting nothing.**
 
@@ -28,7 +28,7 @@ Python 3.9+, standard library only. No dependencies, nothing to install.
 ```bash
 git clone https://github.com/aaronsiebold/failclosed
 cd failclosed
-python3 -m unittest discover -s tests   # 168 tests, under a second
+python3 -m unittest discover -s tests   # 170 tests, under a second
 python3 examples/outbound.py            # the worked example
 python3 -m failclosed.mutate            # break the code, watch tests catch it
 ```
@@ -180,14 +180,14 @@ no mutation sites at all.
 ```
 $ python3 -m failclosed.mutate
 
-56 mutation site(s) across 5 file(s)
+57 mutation site(s) across 5 file(s)
 
-  [  1/56] killed   failclosed/evals.py:58 < -> <=
-  [  2/56] killed   failclosed/evals.py:60 not  -> (deleted)
+  [  1/57] killed   failclosed/evals.py:58 < -> <=
+  [  2/57] killed   failclosed/evals.py:60 not  -> (deleted)
   ...
-  [ 56/56] killed   failclosed/ledger.py:162 not  -> (deleted)
+  [ 57/57] killed   failclosed/ledger.py:162 not  -> (deleted)
 
-54/56 mutants killed  (96.4%)  in 738.8s     # on a Mac under heavy load
+55/57 mutants killed  (96.5%)  in 34.8s
 
 2 known equivalent mutant(s), allow-listed:
 
@@ -221,14 +221,12 @@ safety allow-list.
 
 ### Does it actually catch anything?
 
-Skip the six tests that pin the kill switch's fail-closed branch, with a
+Skip the four tests that pin the kill switch's fail-closed branch, with a
 `@unittest.skip` on each (deleting them would trip the README check, which
 counts the suite):
 
 - `test_an_unreadable_switch_reports_engaged`
 - `test_a_switch_that_cannot_be_checked_is_truthy`
-- `test_a_path_the_os_rejects_is_engaged_and_raises_nothing`
-- `test_a_gate_in_front_of_it_refuses_and_raises_nothing`
 - `test_a_file_where_the_parent_should_be_reads_engaged`
 - `test_a_symlink_loop_as_the_parent_reads_engaged`
 
@@ -236,12 +234,12 @@ Then rerun:
 
 ```
 $ python3 -m unittest discover -s tests
-OK (skipped=6)                        # 168 tests, still green
+OK (skipped=4)                        # 170 tests, still green
 
 $ python3 -m failclosed.mutate
 1 SURVIVOR(S) — no test objected to these changes:
 
-  failclosed/killswitch.py:114 True -> False
+  failclosed/killswitch.py:138 True -> False
       return True
 $ echo $?
 1
@@ -287,10 +285,13 @@ Two properties matter more than the feature:
   answer is stop. Any other design makes the switch useless in exactly the
   conditions that would make you reach for it.
 
-The second property settles the edge cases too. A path no file can ever have
-(empty, a NUL byte, not UTF-8 text) is refused when the `KillSwitch` is built,
-because that switch could never be engaged and would read clear forever. A
-missing file reads clear only when its absence is proven: a missing directory
+The second property settles the edge cases too. A path that is empty, holds a
+NUL byte or is not UTF-8 text is refused when the `KillSwitch` is built. No file
+can have the first two, and macOS cannot store the third, so on a Mac a switch
+at any of them could never be engaged and would read clear forever. `path` is a
+plain attribute, so each check applies the same rule again: set it to one of
+those later and the switch reads engaged, with a reason that says what is wrong.
+A missing file reads clear only when its absence is proven: a missing directory
 proves it, since nobody can create a file inside one, but a directory that is a
 symlink to an unmounted volume proves nothing, so the switch reads engaged. And
 whatever sits at the path, the check comes back. A FIFO or a device is reported
@@ -329,7 +330,7 @@ failclosed/ledger.py      Ledger, StaleLedger                 — a record that 
 failclosed/killswitch.py  KillSwitch                          — one file that stops everything
 failclosed/evals.py       Case, Suite, Baseline, Report       — rate-based eval + drift detection
 failclosed/mutate.py      the mutation runner (excluded from mutation; tested directly)
-tests/                    168 tests, standard library unittest — incl. test_mutate.py
+tests/                    170 tests, standard library unittest — incl. test_mutate.py
 examples/outbound.py      five staged failures against one gate
 docs/DESIGN.md            why each decision went the way it did
 ```

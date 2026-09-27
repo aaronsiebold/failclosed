@@ -87,15 +87,23 @@ is gone. If that matters, keep the switch on local disk.
 
 ## Why a bad kill-switch path fails at construction
 
-An empty path, a NUL byte, or a name that is not UTF-8 text can never hold a
-file. `lstat` finds nothing there, so the switch reads clear, and `engage()`
-raises, so it can never read anything else. The constructor raises `ValueError`
-instead.
+No file can have an empty name or one with a NUL byte, and macOS cannot store
+a name that is not UTF-8 text. `lstat` finds nothing at such a path, so the
+switch reads clear, and `engage()` raises, so it can never read anything else.
+The constructor raises `ValueError` instead. Linux can store a name that is not
+UTF-8, but the rule is the same there, so one config means the same thing on
+every machine.
 
 Reading such a switch as engaged would also fail closed. I chose the error
 because the fault is known before any filesystem is asked, and a typo in config
 should stop the program at startup rather than hold every send at 2am with a
 reason that points at a file nobody can find.
+
+The constructor sees only the path it was given, and `path` is a plain
+attribute. Setting it to `''` afterwards made a gate allow every action while
+`engage()` raised. So `engaged`, `reason` and `engaged_at` apply the same rule
+each time they run. `engaged` promises to raise nothing, so there a bad path
+reads engaged, and the reason names the problem: `unusable path (empty)`.
 
 ## Why the kill switch checks the type before it reads
 

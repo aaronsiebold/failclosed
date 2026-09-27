@@ -179,19 +179,42 @@ class UnusablePathTests(unittest.TestCase):
 class PathChangedLaterTests(unittest.TestCase):
     """`path` is a plain attribute, so it can still be set to a bad value.
 
-    os.* raises ValueError, not OSError, for a NUL byte (in str or bytes)
-    or a lone surrogate. `engaged` answers True for those, so every
-    accessor a caller reads next must answer too, and a Gate in front of
-    the switch must refuse rather than raise.
+    The constructor cannot see that, so every accessor checks the path with
+    the constructor's rule first. A path no switch can be at reads engaged,
+    the reason says why, and a Gate in front of it refuses and raises
+    nothing. Before that check, an empty or non-UTF-8 path set here read
+    clear (lstat found nothing) while engage() raised, and the Gate allowed.
     """
 
     def setUp(self):
         d = tempfile.mkdtemp(prefix="failclosed-test-")
         self.good = os.path.join(d, "HALT")
+        b = os.fsencode(d)
+
+        class EmptyPathLike:
+            def __fspath__(self):
+                return ""
+
+        class BrokenPathLike:
+            def __fspath__(self):
+                raise RuntimeError("config backend down")
+
+        # label -> (path, why the reason gives)
         self.paths = {
-            "NUL in str": os.path.join(d, "HA\0LT"),
-            "lone surrogate": os.path.join(d, "HA\ud800LT"),
-            "NUL in bytes": os.path.join(os.fsencode(d), b"HA\0LT"),
+            "empty str": ("", "empty"),
+            "empty bytes": (b"", "empty"),
+            "empty PathLike": (EmptyPathLike(), "empty"),
+            "NUL in str": (os.path.join(d, "HA\0LT"), "contains a NUL byte"),
+            "NUL in bytes": (os.path.join(b, b"HA\0LT"), "contains a NUL byte"),
+            "lone surrogate": (os.path.join(d, "HA\ud800LT"), "not UTF-8 text"),
+            "surrogate-escaped str": (os.path.join(d, "HA\udcffLT"), "not UTF-8 text"),
+            "invalid UTF-8 bytes": (os.path.join(b, b"HA\xffLT"), "not UTF-8 text"),
+            "CESU-8 bytes": (os.path.join(b, b"HA\xed\xa0\x80\xed\xb0\x80LT"), "not UTF-8 text"),
+            "overlong bytes": (os.path.join(b, b"HA\xc0\xafLT"), "not UTF-8 text"),
+            "None": (None, "not a path"),
+            "0, which lstat reads as fd 0": (0, "not a path"),
+            "a float": (1.5, "not a path"),
+            "a PathLike that raises": (BrokenPathLike(), "not a path"),
         }
 
     def switch(self, path):
@@ -199,23 +222,37 @@ class PathChangedLaterTests(unittest.TestCase):
         s.path = path
         return s
 
-    def test_a_gate_in_front_of_it_refuses_and_raises_nothing(self):
-        for label, path in self.paths.items():
+    def test_it_reads_engaged(self):
+        for label, (path, _) in self.paths.items():
+            with self.subTest(label):
+                s = self.switch(path)
+                self.assertIs(s.engaged, True)
+                self.assertIn("ENGAGED", repr(s))
+
+    def test_a_gate_in_front_of_it_refuses_and_says_why(self):
+        for label, (path, why) in self.paths.items():
             with self.subTest(label):
                 d = Gate(lambda a: None, killswitch=self.switch(path)).evaluate("x")
                 self.assertFalse(d.allowed)
                 self.assertEqual(d.guard, "killswitch")
-                self.assertEqual(d.reason, "kill switch engaged: no reason recorded")
+                self.assertEqual(d.reason, f"kill switch engaged: unusable path ({why})")
 
-    def test_reason_is_empty(self):
-        for label, path in self.paths.items():
+    def test_reason_says_why(self):
+        for label, (path, why) in self.paths.items():
             with self.subTest(label):
-                self.assertEqual(self.switch(path).reason, "")
+                self.assertEqual(self.switch(path).reason, f"unusable path ({why})")
 
     def test_engaged_at_is_none(self):
-        for label, path in self.paths.items():
+        for label, (path, _) in self.paths.items():
             with self.subTest(label):
                 self.assertIsNone(self.switch(path).engaged_at)
+
+    def test_a_good_path_set_later_works_like_one_given_at_construction(self):
+        s = self.switch(os.fsencode(self.good))
+        self.assertFalse(s.engaged)
+        KillSwitch(self.good).engage("set later")
+        self.assertTrue(s.engaged)
+        self.assertEqual(s.reason, "set later")
 
 
 class AbsentSwitchTests(unittest.TestCase):

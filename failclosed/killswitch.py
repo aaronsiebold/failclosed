@@ -16,9 +16,11 @@ Two consequences of the second rule:
   proves it, because no one can create a file inside a directory that is not
   there. A directory that is a symlink to nothing proves nothing: that is a
   disk that went away, and the switch may be on it.
-* A path no file can ever have (empty, a NUL byte, not UTF-8 text) is refused
-  when the KillSwitch is built. Such a switch would read clear, and engage()
-  could never change that.
+* A path no switch file can be at (empty, a NUL byte, not UTF-8 text) is
+  refused when the KillSwitch is built. Such a switch would read clear, and
+  engage() could never change that. `path` stays a plain attribute, so each
+  check applies the same rule again: a bad path set later reads engaged, and
+  `reason` says why.
 """
 
 from __future__ import annotations
@@ -42,20 +44,35 @@ _KINDS = {
 }
 
 
-def _usable(path: Union[str, bytes, os.PathLike]) -> str:
-    """The path as text, or ValueError if no switch file could ever be there."""
-    text = os.fsdecode(path)  # TypeError for anything that is not a path
+def _flaw(text: str) -> str:
+    """Why no switch file can be at `text`, or "" if one can.
+
+    Empty or NUL: no file has that name. Not UTF-8: macOS cannot store the
+    name, and it is refused everywhere so a config means the same thing on
+    every machine.
+    """
     if not text:
-        why = "it is empty"
-    elif "\0" in text:
-        why = "it contains a NUL byte"
-    else:
-        try:
-            text.encode("utf-8")
-            return text
-        except UnicodeEncodeError:
-            why = "it is not valid UTF-8 text"
-    raise ValueError(f"kill switch path {path!r} can never be engaged: {why}")
+        return "empty"
+    if "\0" in text:
+        return "contains a NUL byte"
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return "not UTF-8 text"
+    return ""
+
+
+def _checked(path: object) -> tuple[str, str]:
+    """(`path` as text, its flaw). What `path` holds now, checked again.
+
+    `path` is a plain attribute, so a caller can set it to anything after
+    the constructor has checked it.
+    """
+    try:
+        text = os.fsdecode(path)  # type: ignore[arg-type]
+    except Exception:  # noqa: BLE001 - not a path, or a __fspath__ that raised
+        return "", "not a path"
+    return text, _flaw(text)
 
 
 def _absence_is_proven(path: str) -> bool:
@@ -96,26 +113,33 @@ class KillSwitch:
     """
 
     def __init__(self, path: Union[str, bytes, os.PathLike]) -> None:
-        self.path: str = _usable(path)
+        text = os.fsdecode(path)  # TypeError for anything that is not a path
+        why = _flaw(text)
+        if why:
+            raise ValueError(f"kill switch path {path!r} can never be engaged ({why})")
+        self.path: str = text
 
     @property
     def engaged(self) -> bool:
+        path, why = _checked(self.path)
+        if why:
+            return True
         # Not os.path.exists(): it catches OSError itself and answers False,
         # which would make an unreadable switch read as clear. lstat, so a
         # dangling symlink at the path still counts as present.
         try:
-            os.lstat(self.path)
+            os.lstat(path)
         except FileNotFoundError:
             pass
         except (OSError, ValueError):
             # Cannot determine -> treat as engaged. See module docstring.
-            # ValueError: a NUL byte or lone surrogate, if `path` was changed
-            # after construction; lstat rejects those before the OS sees them.
+            # ValueError should not get past _checked; if it does, the
+            # answer is still "engaged", never an exception.
             return True
         else:
             return True
         try:
-            return not _absence_is_proven(self.path)
+            return not _absence_is_proven(path)
         except (OSError, ValueError):
             return True
 
@@ -129,18 +153,21 @@ class KillSwitch:
 
         Only a regular file is read. A FIFO blocks `open()` until a writer
         arrives and a device like /dev/zero never ends, so either would hang
-        the Gate in front of it. Anything else answers with its type instead.
+        the Gate in front of it. Anything else answers with its type instead,
+        and a path no switch can be at answers with what is wrong with it.
         """
+        path, why = _checked(self.path)
+        if why:
+            return f"unusable path ({why})"
         try:
-            mode = os.stat(self.path).st_mode
+            mode = os.stat(path).st_mode
             if not stat.S_ISREG(mode):
                 return _unusual(mode)
             # O_NONBLOCK: if a FIFO replaced the file since the stat, the
             # open returns at once, and the fstat below catches the swap.
-            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
         except (OSError, ValueError):
-            # Absent, unreadable, or a path the OS rejects: no reason to give.
-            # ValueError is a NUL byte or a lone surrogate in the path.
+            # Absent or unreadable: no reason to give.
             return ""
         try:
             mode = os.fstat(fd).st_mode
@@ -158,8 +185,11 @@ class KillSwitch:
 
     @property
     def engaged_at(self) -> Optional[float]:
+        path, why = _checked(self.path)
+        if why:
+            return None
         try:
-            return os.path.getmtime(self.path)
+            return os.path.getmtime(path)
         except (OSError, ValueError):
             return None
 
