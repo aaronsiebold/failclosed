@@ -23,7 +23,7 @@ from .ledger import Entry, Ledger, StaleLedger
 from .killswitch import KillSwitch
 from .evals import Baseline, Case, CaseResult, Report, Suite
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Decision", "Gate", "Guard", "Refuse", "Undetermined", "guard",
