@@ -13,15 +13,18 @@ not look answered as if it had looked and found nothing.
 
 ### Changed
 
-- **Breaking:** `KillSwitch(path)` refuses a path no switch file can be at. An
-  empty path (`''`, `b''`), a path with a NUL byte and a path that is not UTF-8
-  text (a lone surrogate, invalid UTF-8 bytes) raise `ValueError`. A value that
-  is not a path (`None`, `0`, `1.5`) raises `TypeError`. In 0.1.0 the first
-  group built a switch that read clear forever, because `engage()` could not
-  create the file; `KillSwitch(0)` checked file descriptor 0, and
+- **Breaking:** `KillSwitch(path)` refuses a path that cannot work as a switch
+  on every machine. An empty path (`''`, `b''`), a path with a NUL byte and a
+  path that is not UTF-8 text (a lone surrogate, invalid UTF-8 bytes) raise
+  `ValueError`. A value that is not a path (`None`, `0`, `1.5`) raises
+  `TypeError`. In 0.1.0 an empty or NUL path built a switch that read clear
+  forever, because `engage()` could not create the file. Non-UTF-8 paths did the
+  same on macOS but worked on Linux, so the same config meant different things
+  on different machines. `KillSwitch(0)` checked file descriptor 0, and
   `KillSwitch(None).engaged` raised.
 - **Breaking:** `Ledger(path)` and `Baseline.load(path)` raise `OSError` when
-  they cannot read the file, unless it is missing. In 0.1.0 a file inside a
+  they cannot read the file, unless it is missing, and `ValueError` for a path
+  with a NUL byte. In 0.1.0 a file inside a
   directory the process could not search loaded as empty: the ledger forgot
   every recorded send, and drift detection turned off. A missing file still
   starts empty.
