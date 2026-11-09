@@ -27,6 +27,7 @@ this module does not touch global RNG state.
 from __future__ import annotations
 
 import json
+import math
 import os
 import statistics
 import time
@@ -57,6 +58,8 @@ class Case:
     def __post_init__(self) -> None:
         if self.trials < 1:
             raise ValueError("trials must be at least 1")
+        if not (math.isfinite(self.drift_tolerance) and self.drift_tolerance >= 0.0):
+            raise ValueError("drift_tolerance must be finite and non-negative")
         if not 0.0 <= self.min_pass_rate <= 1.0:
             raise ValueError("min_pass_rate must be between 0 and 1")
 
@@ -91,7 +94,12 @@ class CaseResult:
     @property
     def regressed(self) -> bool:
         d = self.drift
-        return d is not None and d < -self.drift_tolerance
+        if d is None:
+            return False
+        if math.isnan(d) or math.isnan(self.drift_tolerance):
+            return True  # an unreadable comparison is a regression, not a pass
+        # Rounding absorbs float noise: 0.7 - 0.8 is -0.10000000000000009.
+        return round(d + self.drift_tolerance, 9) < 0
 
     @property
     def ok(self) -> bool:

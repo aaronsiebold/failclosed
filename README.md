@@ -3,7 +3,7 @@
 [![ci](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml/badge.svg)](https://github.com/aaronsiebold/failclosed/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![mutation score](https://img.shields.io/badge/mutants%20killed-55%2F57-brightgreen)
+![mutation score](https://img.shields.io/badge/mutants%20killed-62%2F64-brightgreen)
 
 **A guard that stays green when you inject a violation is asserting nothing.**
 
@@ -28,7 +28,7 @@ Python 3.9+, standard library only. No dependencies, nothing to install.
 ```bash
 git clone https://github.com/aaronsiebold/failclosed
 cd failclosed
-python3 -m unittest discover -s tests   # 172 tests, under a second
+python3 -m unittest discover -s tests   # 182 tests, under a second
 python3 examples/outbound.py            # the worked example
 python3 -m failclosed.mutate            # break the code, watch tests catch it
 ```
@@ -180,18 +180,18 @@ no mutation sites at all.
 ```
 $ python3 -m failclosed.mutate
 
-57 mutation site(s) across 5 file(s)
+64 mutation site(s) across 5 file(s)
 
-  [  1/57] killed   failclosed/evals.py:58 < -> <=
-  [  2/57] killed   failclosed/evals.py:60 not  -> (deleted)
+  [  1/64] killed   failclosed/evals.py:59 < -> <=
+  [  2/64] killed   failclosed/evals.py:61 not  -> (deleted)
   ...
-  [ 57/57] killed   failclosed/ledger.py:162 not  -> (deleted)
+  [ 64/64] killed   failclosed/ledger.py:166 not  -> (deleted)
 
-55/57 mutants killed  (96.5%)  in 34.8s
+62/64 mutants killed  (96.9%)  in 7.2s
 
 2 known equivalent mutant(s), allow-listed:
 
-  failclosed/evals.py:146 True -> False
+  failclosed/evals.py:154 True -> False
       sort_keys changes key order in the serialized JSON, not behavior; the file round-trips identically either way
   failclosed/ledger.py:55 True -> False
       as above: byte order of a serialized entry, not behavior
@@ -234,7 +234,7 @@ Then rerun:
 
 ```
 $ python3 -m unittest discover -s tests
-OK (skipped=4)                        # 172 tests, still green
+OK (skipped=4)                        # 182 tests, still green
 
 $ python3 -m failclosed.mutate
 1 SURVIVOR(S) — no test objected to these changes:
@@ -330,7 +330,7 @@ failclosed/ledger.py      Ledger, StaleLedger                 — a record that 
 failclosed/killswitch.py  KillSwitch                          — one file that stops everything
 failclosed/evals.py       Case, Suite, Baseline, Report       — rate-based eval + drift detection
 failclosed/mutate.py      the mutation runner (excluded from mutation; tested directly)
-tests/                    172 tests, standard library unittest — incl. test_mutate.py
+tests/                    182 tests, standard library unittest — incl. test_mutate.py
 examples/outbound.py      five staged failures against one gate
 docs/DESIGN.md            why each decision went the way it did
 CHANGELOG.md              what changed in each release, and what it breaks

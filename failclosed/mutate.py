@@ -65,6 +65,10 @@ DEFAULT_TEST_CMD = [sys.executable, "-m", "unittest", "discover", "-q", "-s", "t
 MUTANT_ENV = "FAILCLOSED_MUTANT_RUN"
 
 
+class BaselineError(RuntimeError):
+    """The unmutated test suite failed or timed out, so no mutant score means anything."""
+
+
 @dataclass(frozen=True)
 class Mutation:
     path: str          # relative to the repo root
@@ -151,10 +155,12 @@ def sites(path: str, *, relative_to: Optional[str] = None) -> List[Mutation]:
                              tok.string, NAME_MUTATIONS[tok.string])
                 )
             elif tok.string == NOT_TOKEN:
-                # Drop the `not` and the space after it.
-                found.append(
-                    Mutation(rel, tok.start[0], tok.start[1], tok.end[1] + 1, "not ", "")
-                )
+                # Drop the `not` and the whitespace after it, only if it is whitespace.
+                nxt = tok.line[tok.end[1]:tok.end[1] + 1]
+                if nxt == " ":
+                    found.append(Mutation(rel, tok.start[0], tok.start[1], tok.end[1] + 1, "not ", ""))
+                else:
+                    found.append(Mutation(rel, tok.start[0], tok.start[1], tok.end[1], "not", ""))
     return found
 
 
@@ -231,6 +237,19 @@ def run(
         ignore=shutil.ignore_patterns("__pycache__", ".git", ".mypy_cache", "*.pyc"),
     )
     try:
+        try:
+            base = subprocess.run(
+                list(test_cmd), cwd=sandbox, timeout=timeout,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=_child_env(),
+            )
+        except subprocess.TimeoutExpired:
+            raise BaselineError("unmutated test run timed out") from None
+        if base.returncode != 0:
+            raise BaselineError(
+                f"unmutated test run failed (exit {base.returncode}); "
+                "fix the suite before measuring mutants"
+            )
         originals: Dict[str, List[str]] = {}
         for m in mutations:
             if m.path not in originals:
@@ -319,7 +338,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\n{n} site(s)")
         return 0
 
-    _, survivors = run(args.root, args.package, target=args.target, timeout=args.timeout)
+    try:
+        _, survivors = run(args.root, args.package, target=args.target, timeout=args.timeout)
+    except BaselineError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return 1 if survivors else 0
 
 
