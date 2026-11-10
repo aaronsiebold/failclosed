@@ -133,7 +133,7 @@ class Ledger:
     @property
     def is_fresh(self) -> bool:
         age = self.age
-        return age is not None and age <= self.max_staleness
+        return age is not None and 0 <= age <= self.max_staleness
 
     def require_fresh(self) -> None:
         """Raise `StaleLedger` unless the ledger was synced recently enough."""
@@ -141,6 +141,10 @@ class Ledger:
         if age is None:
             raise StaleLedger(
                 "ledger has never been synced against the authoritative source"
+            )
+        if age < 0:
+            raise StaleLedger(
+                f"clock moved backward since last sync ({age:.0f}s); cannot trust freshness"
             )
         if age > self.max_staleness:
             raise StaleLedger(
@@ -162,8 +166,8 @@ class Ledger:
             if key not in self._keys:
                 unseen += 1
                 entry = Entry(key=key, at=stamp, meta={"source": "sync"})
-                self._keys[key] = entry
                 self._append(entry)
+                self._keys[key] = entry
         self._synced_at = stamp
         return unseen
 
@@ -179,8 +183,8 @@ class Ledger:
     def record(self, key: str, **meta: Any) -> Entry:
         """Note that `key` has now been acted on."""
         entry = Entry(key=key, at=self._clock(), meta=meta)
-        self._keys[key] = entry
         self._append(entry)
+        self._keys[key] = entry
         return entry
 
     def get(self, key: str) -> Optional[Entry]:

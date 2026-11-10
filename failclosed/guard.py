@@ -15,6 +15,7 @@ anything that touches the outside world.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, List, Optional, Sequence
@@ -148,7 +149,17 @@ class Gate:
         for g in self._guards:
             name = _name_of(g)
             try:
-                g(action)
+                result = g(action)
+                if inspect.isawaitable(result):
+                    # An async guard has not run; allowing it would fail open.
+                    if inspect.iscoroutine(result):
+                        result.close()
+                    return Decision(
+                        False,
+                        "guard returned an awaitable; async guards are not supported",
+                        guard=name,
+                        cleared=tuple(cleared),
+                    )
             except Refuse as exc:
                 return Decision(False, str(exc) or "refused", guard=name, cleared=tuple(cleared))
             except Undetermined as exc:
